@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- This next line is CRITICAL for mobile phones. It sets the zoom level correctly. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Elevator Connector Search</title>
+    <style>
+        /* This CSS is designed for a clean, mobile-first experience */
+        :root {
+            --primary-color: #007bff;
+            --bg-color: #f4f4f8;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 15px;
+        }
+        .container {
+            max-width: 100%;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        #searchInput {
+            width: 100%;
+            padding: 16px;
+            font-size: 18px;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            box-sizing: border-box;
+            /* Prevents the default iOS input style */
+            -webkit-appearance: none; 
+        }
+        #status-message {
+            text-align: center;
+            color: #777;
+            margin-top: 40px;
+            padding: 20px;
+        }
+        .result-card {
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            margin-top: 20px;
+            overflow: hidden;
+        }
+        .card-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 12px 15px;
+            font-weight: bold;
+            font-size: 18px;
+        }
+        .card-body {
+            padding: 15px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            /* Allows long text to wrap */
+            word-break: break-all;
+        }
+        .card-body .description {
+            font-style: italic;
+            color: #555;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .card-body .pin-row {
+            padding: 5px 0;
+            display: flex;
+        }
+        .pin-num {
+            font-weight: bold;
+            width: 60px;
+        }
+        .pin-signal {
+            flex-grow: 1;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Elevator Search</h1>
+        <input type="text" id="searchInput" placeholder="Search for PCB, Connector, Signal..." autocomplete="off">
+        <div id="results-container"></div>
+        <div id="status-message">Loading database... Please wait.</div>
+    </div>
+
+    <script>
+        // Key names must exactly match the headers in your JSON file
+        const PCB_KEY = "PCB";
+        const CONNECTOR_KEY = "CONNECTOR  NUM"; // Note the double space
+        const SIDE_KEY = "SIDE";
+        const PIN_NUM_KEY = "Attribute"; // From the unpivot process
+        const SIGNAL_KEY = "Value";      // From the unpivot process
+        const DESC_KEY = "SIGNAL NAME";
+
+        // Get references to the HTML elements
+        const searchInput = document.getElementById('searchInput');
+        const resultsContainer = document.getElementById('results-container');
+        const statusMessage = document.getElementById('status-message');
+        let pinData = []; // This will hold our database once loaded
+
+        // This function loads the data from your database.json file
+        async function loadData() {
+            try {
+                // The 'fetch' command is like a 'go and get' for a file
+                const response = await fetch('database.json');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                pinData = await response.json(); // Read the file as JSON
+                statusMessage.textContent = "Database loaded. Ready to search.";
+            } catch (error) {
+                statusMessage.textContent = "Error: Could not load database.json.";
+                console.error("Fetch error:", error);
+            }
+        }
+
+        // This function runs every time you type in the search box
+        function performSearch() {
+            const searchTerm = searchInput.value.trim().toUpperCase();
+            
+            resultsContainer.innerHTML = ''; // Clear old results
+
+            if (searchTerm.length < 2) {
+                statusMessage.textContent = "Please enter at least 2 characters.";
+                statusMessage.style.display = 'block';
+                return;
+            }
+
+            // Filter the entire database to find matching pins
+            const searchResults = pinData.filter(pin => 
+                Object.values(pin).some(value => String(value).toUpperCase().includes(searchTerm))
+            );
+
+            if (searchResults.length > 0) {
+                statusMessage.style.display = 'none'; // Hide status message
+                displayResults(searchResults, searchTerm);
+            } else {
+                statusMessage.textContent = `No results found for "${searchInput.value}"`;
+                statusMessage.style.display = 'block';
+            }
+        }
+
+        // This function takes the found results and displays them nicely
+        function displayResults(results, searchTerm) {
+            const groupedByConnector = {};
+            // Group the pins by their parent connector to avoid repetition
+            results.forEach(pin => {
+                const groupKey = `${pin[PCB_KEY]}_${pin[CONNECTOR_KEY]}`;
+                if (!groupedByConnector[groupKey]) {
+                    groupedByConnector[groupKey] = [];
+                }
+                groupedByConnector[groupKey].push(pin);
+            });
+
+            // Create a "card" for each connector found
+            for (const groupKey in groupedByConnector) {
+                const pins = groupedByConnector[groupKey];
+                const firstPin = pins[0];
+
+                const card = document.createElement('div');
+                card.className = 'result-card';
+
+                // Create the HTML for the card's content
+                card.innerHTML = `
+                    <div class="card-header">${highlight(firstPin[PCB_KEY], searchTerm)} / ${highlight(firstPin[CONNECTOR_KEY], searchTerm)}</div>
+                    <div class="card-body">
+                        <div class="description">${highlight(firstPin[DESC_KEY], searchTerm)}</div>
+                        ${pins.map(pin => `
+                            <div class="pin-row">
+                                <div class="pin-num">${highlight(pin[PIN_NUM_KEY], searchTerm)} (${highlight(pin[SIDE_KEY], searchTerm)})</div>
+                                <div class="pin-signal">${highlight(pin[SIGNAL_KEY], searchTerm)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                resultsContainer.appendChild(card);
+            }
+        }
+
+        // This function highlights the search term in the results
+        function highlight(text, term) {
+            text = String(text || ''); // Ensure text is a string
+            const regex = new RegExp(`(${term})`, 'gi');
+            return text.replace(regex, `<span class="highlight">$1</span>`);
+        }
+
+        // --- Setting up the search ---
+        let debounceTimer;
+        // Listen for typing in the search box
+        searchInput.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            // Wait 250ms after the user stops typing to perform the search
+            debounceTimer = setTimeout(performSearch, 250);
+        });
+
+        // Load the database as soon as the page is ready
+        document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>
